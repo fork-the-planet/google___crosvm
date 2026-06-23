@@ -15,13 +15,14 @@ clone: 1
 fchdir: 1
 fstat: 1
 getdents64: 1
-#ioctl: FIONBIO, SIOCGIFMTU, SIOCSIFFLAGS, SIOCGIFFLAGS, TCGETS, TUNSETIFF
+#ioctl: FIONBIO, SIOCGIFMTU, SIOCSIFFLAGS, SIOCGIFFLAGS, TCGETS, TCGETS2, TUNSETIFF
 # TUNSETVNETHDRSZ, TUNSETOFFLOAD, UFFDIO_API, USERFAULTFD_IOC_NEW
 ioctl: arg1 == 0x5421 || \
        arg1 == 0x8921 || \
        arg1 == 0x8914 || \
        arg1 == 0x8913 || \
        arg1 == 0x5401 || \
+       arg1 == 0x802c542a || \
        arg1 == 0x400454ca || \
        arg1 == 0x400454d8 || \
        arg1 == 0x400454d0 || \
