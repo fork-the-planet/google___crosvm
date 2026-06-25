@@ -179,7 +179,7 @@ mod tests {
         let path = "/path/to/disk.img";
         let disk = DiskOption {
             path: PathBuf::from(path),
-            ..DiskOption::default()
+            ..Default::default()
         };
         assert_eq!(disk, from_key_values(path).unwrap());
     }
@@ -202,20 +202,7 @@ mod tests {
             params,
             DiskOption {
                 path: "/path/to/disk.img".into(),
-                read_only: false,
-                root: false,
-                sparse: true,
-                direct: false,
-                lock: true,
-                block_size: 512,
-                id: None,
-                #[cfg(windows)]
-                io_concurrency: NonZeroU32::new(1).unwrap(),
-                multiple_workers: false,
-                async_executor: None,
-                packed_queue: false,
-                bootindex: None,
-                pci_address: None,
+                ..Default::default()
             }
         );
 
@@ -225,20 +212,8 @@ mod tests {
             params,
             DiskOption {
                 path: "/path/to/disk.img".into(),
-                read_only: false,
-                root: false,
-                sparse: true,
-                direct: false,
-                lock: true,
-                block_size: 512,
-                id: None,
-                #[cfg(windows)]
-                io_concurrency: NonZeroU32::new(1).unwrap(),
-                multiple_workers: false,
-                async_executor: None,
-                packed_queue: false,
                 bootindex: Some(5),
-                pci_address: None,
+                ..Default::default()
             }
         );
 
@@ -248,20 +223,7 @@ mod tests {
             params,
             DiskOption {
                 path: "/path/to/disk.img".into(),
-                read_only: false,
-                root: false,
-                sparse: true,
-                direct: false,
-                lock: true,
-                block_size: 512,
-                id: None,
-                #[cfg(windows)]
-                io_concurrency: NonZeroU32::new(1).unwrap(),
-                multiple_workers: false,
-                async_executor: None,
-                packed_queue: false,
-                bootindex: None,
-                pci_address: None,
+                ..Default::default()
             }
         );
 
@@ -272,19 +234,7 @@ mod tests {
             DiskOption {
                 path: "/some/path.img".into(),
                 read_only: true,
-                root: false,
-                sparse: true,
-                direct: false,
-                lock: true,
-                block_size: 512,
-                id: None,
-                #[cfg(windows)]
-                io_concurrency: NonZeroU32::new(1).unwrap(),
-                multiple_workers: false,
-                async_executor: None,
-                packed_queue: false,
-                bootindex: None,
-                pci_address: None,
+                ..Default::default()
             }
         );
 
@@ -294,20 +244,8 @@ mod tests {
             params,
             DiskOption {
                 path: "/some/path.img".into(),
-                read_only: false,
                 root: true,
-                sparse: true,
-                direct: false,
-                lock: true,
-                block_size: 512,
-                id: None,
-                #[cfg(windows)]
-                io_concurrency: NonZeroU32::new(1).unwrap(),
-                multiple_workers: false,
-                async_executor: None,
-                packed_queue: false,
-                bootindex: None,
-                pci_address: None,
+                ..Default::default()
             }
         );
 
@@ -317,20 +255,7 @@ mod tests {
             params,
             DiskOption {
                 path: "/some/path.img".into(),
-                read_only: false,
-                root: false,
-                sparse: true,
-                direct: false,
-                lock: true,
-                block_size: 512,
-                id: None,
-                #[cfg(windows)]
-                io_concurrency: NonZeroU32::new(1).unwrap(),
-                multiple_workers: false,
-                async_executor: None,
-                packed_queue: false,
-                bootindex: None,
-                pci_address: None,
+                ..Default::default()
             }
         );
         let params = from_block_arg("/some/path.img,sparse=false").unwrap();
@@ -338,20 +263,8 @@ mod tests {
             params,
             DiskOption {
                 path: "/some/path.img".into(),
-                read_only: false,
-                root: false,
                 sparse: false,
-                direct: false,
-                lock: true,
-                block_size: 512,
-                id: None,
-                #[cfg(windows)]
-                io_concurrency: NonZeroU32::new(1).unwrap(),
-                multiple_workers: false,
-                async_executor: None,
-                packed_queue: false,
-                bootindex: None,
-                pci_address: None,
+                ..Default::default()
             }
         );
 
@@ -361,20 +274,8 @@ mod tests {
             params,
             DiskOption {
                 path: "/some/path.img".into(),
-                read_only: false,
-                root: false,
-                sparse: true,
                 direct: true,
-                lock: true,
-                block_size: 512,
-                id: None,
-                #[cfg(windows)]
-                io_concurrency: NonZeroU32::new(1).unwrap(),
-                multiple_workers: false,
-                async_executor: None,
-                packed_queue: false,
-                bootindex: None,
-                pci_address: None,
+                ..Default::default()
             }
         );
 
@@ -384,20 +285,8 @@ mod tests {
             params,
             DiskOption {
                 path: "/some/path.img".into(),
-                read_only: false,
-                root: false,
-                sparse: true,
                 direct: true,
-                lock: true,
-                block_size: 512,
-                id: None,
-                #[cfg(windows)]
-                io_concurrency: NonZeroU32::new(1).unwrap(),
-                multiple_workers: false,
-                async_executor: None,
-                packed_queue: false,
-                bootindex: None,
-                pci_address: None,
+                ..Default::default()
             }
         );
 
@@ -407,20 +296,8 @@ mod tests {
             params,
             DiskOption {
                 path: "/some/path.img".into(),
-                read_only: false,
-                root: false,
-                sparse: true,
-                direct: false,
-                lock: true,
                 block_size: 128,
-                id: None,
-                #[cfg(windows)]
-                io_concurrency: NonZeroU32::new(1).unwrap(),
-                multiple_workers: false,
-                async_executor: None,
-                packed_queue: false,
-                bootindex: None,
-                pci_address: None,
+                ..Default::default()
             }
         );
 
@@ -430,20 +307,8 @@ mod tests {
             params,
             DiskOption {
                 path: "/some/path.img".into(),
-                read_only: false,
-                root: false,
-                sparse: true,
-                direct: false,
-                lock: true,
                 block_size: 128,
-                id: None,
-                async_executor: None,
-                #[cfg(windows)]
-                io_concurrency: NonZeroU32::new(1).unwrap(),
-                multiple_workers: false,
-                packed_queue: false,
-                bootindex: None,
-                pci_address: None,
+                ..Default::default()
             }
         );
 
@@ -455,19 +320,8 @@ mod tests {
                 params,
                 DiskOption {
                     path: "/some/path.img".into(),
-                    read_only: false,
-                    root: false,
-                    sparse: true,
-                    direct: false,
-                    lock: true,
-                    block_size: 512,
-                    id: None,
                     io_concurrency: NonZeroU32::new(4).unwrap(),
-                    multiple_workers: false,
-                    async_executor: None,
-                    packed_queue: false,
-                    bootindex: None,
-                    pci_address: None,
+                    ..Default::default()
                 }
             );
             let params = from_block_arg("/some/path.img,async-executor=overlapped").unwrap();
@@ -475,19 +329,8 @@ mod tests {
                 params,
                 DiskOption {
                     path: "/some/path.img".into(),
-                    read_only: false,
-                    root: false,
-                    sparse: true,
-                    direct: false,
-                    lock: true,
-                    block_size: 512,
-                    id: None,
-                    io_concurrency: NonZeroU32::new(1).unwrap(),
-                    multiple_workers: false,
                     async_executor: Some(ExecutorKindSys::Overlapped { concurrency: None }.into()),
-                    packed_queue: false,
-                    bootindex: None,
-                    pci_address: None,
+                    ..Default::default()
                 }
             );
             let params =
@@ -497,24 +340,13 @@ mod tests {
                 params,
                 DiskOption {
                     path: "/some/path.img".into(),
-                    read_only: false,
-                    root: false,
-                    sparse: true,
-                    direct: false,
-                    lock: true,
-                    block_size: 512,
-                    id: None,
-                    io_concurrency: NonZeroU32::new(1).unwrap(),
-                    multiple_workers: false,
                     async_executor: Some(
                         ExecutorKindSys::Overlapped {
                             concurrency: Some(4)
                         }
                         .into()
                     ),
-                    packed_queue: false,
-                    bootindex: None,
-                    pci_address: None,
+                    ..Default::default()
                 }
             );
         }
@@ -525,20 +357,8 @@ mod tests {
             params,
             DiskOption {
                 path: "/some/path.img".into(),
-                read_only: false,
-                root: false,
-                sparse: true,
-                direct: false,
-                lock: true,
-                block_size: 512,
                 id: Some(*b"DISK\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0"),
-                #[cfg(windows)]
-                io_concurrency: NonZeroU32::new(1).unwrap(),
-                multiple_workers: false,
-                async_executor: None,
-                packed_queue: false,
-                bootindex: None,
-                pci_address: None,
+                ..Default::default()
             }
         );
         let err = from_block_arg("/some/path.img,id=DISK_ID_IS_WAY_TOO_LONG").unwrap_err();
@@ -561,20 +381,8 @@ mod tests {
             params,
             DiskOption {
                 path: "/some/path.img".into(),
-                read_only: false,
-                root: false,
-                sparse: true,
-                direct: false,
-                lock: true,
-                block_size: 512,
-                id: None,
-                #[cfg(windows)]
-                io_concurrency: NonZeroU32::new(1).unwrap(),
-                multiple_workers: false,
                 async_executor: Some(ex_kind),
-                packed_queue: false,
-                bootindex: None,
-                pci_address: None,
+                ..Default::default()
             }
         );
 
@@ -584,20 +392,8 @@ mod tests {
             params,
             DiskOption {
                 path: "/path/to/disk.img".into(),
-                read_only: false,
-                root: false,
-                sparse: true,
-                direct: false,
-                lock: true,
-                block_size: 512,
-                id: None,
-                #[cfg(windows)]
-                io_concurrency: NonZeroU32::new(1).unwrap(),
-                multiple_workers: false,
-                async_executor: None,
                 packed_queue: true,
-                bootindex: None,
-                pci_address: None,
+                ..Default::default()
             }
         );
 
@@ -607,24 +403,12 @@ mod tests {
             params,
             DiskOption {
                 path: "/path/to/disk.img".into(),
-                read_only: false,
-                root: false,
-                sparse: true,
-                direct: false,
-                lock: true,
-                block_size: 512,
-                id: None,
-                #[cfg(windows)]
-                io_concurrency: NonZeroU32::new(1).unwrap(),
-                multiple_workers: false,
-                async_executor: None,
-                packed_queue: false,
-                bootindex: None,
                 pci_address: Some(PciAddress {
                     bus: 0,
                     dev: 1,
                     func: 1,
                 }),
+                ..Default::default()
             }
         );
 
@@ -634,20 +418,7 @@ mod tests {
             params,
             DiskOption {
                 path: "/path/to/disk.img".into(),
-                read_only: false,
-                root: false,
-                sparse: true,
-                direct: false,
-                lock: true,
-                block_size: 512,
-                id: None,
-                #[cfg(windows)]
-                io_concurrency: NonZeroU32::new(1).unwrap(),
-                multiple_workers: false,
-                async_executor: None,
-                packed_queue: false,
-                bootindex: None,
-                pci_address: None,
+                ..Default::default()
             }
         );
         // lock=false
@@ -656,20 +427,8 @@ mod tests {
             params,
             DiskOption {
                 path: "/path/to/disk.img".into(),
-                read_only: false,
-                root: false,
-                sparse: true,
-                direct: false,
                 lock: false,
-                block_size: 512,
-                id: None,
-                #[cfg(windows)]
-                io_concurrency: NonZeroU32::new(1).unwrap(),
-                multiple_workers: false,
-                async_executor: None,
-                packed_queue: false,
-                bootindex: None,
-                pci_address: None,
+                ..Default::default()
             }
         );
 
@@ -687,20 +446,15 @@ mod tests {
                 root: true,
                 sparse: false,
                 direct: true,
-                lock: true,
                 block_size: 256,
                 id: Some(*b"DISK_LABEL\0\0\0\0\0\0\0\0\0\0"),
-                #[cfg(windows)]
-                io_concurrency: NonZeroU32::new(1).unwrap(),
-                multiple_workers: false,
                 async_executor: Some(ex_kind),
-                packed_queue: false,
-                bootindex: None,
                 pci_address: Some(PciAddress {
                     bus: 0,
                     dev: 1,
                     func: 1,
                 }),
+                ..Default::default()
             }
         );
     }
@@ -710,20 +464,7 @@ mod tests {
         // With id == None
         let original = DiskOption {
             path: "./rootfs".into(),
-            read_only: false,
-            root: false,
-            sparse: true,
-            direct: false,
-            lock: true,
-            block_size: 512,
-            id: None,
-            #[cfg(windows)]
-            io_concurrency: NonZeroU32::new(1).unwrap(),
-            multiple_workers: false,
-            async_executor: None,
-            packed_queue: false,
-            bootindex: None,
-            pci_address: None,
+            ..Default::default()
         };
         let json = serde_json::to_string(&original).unwrap();
         let deserialized = serde_json::from_str(&json).unwrap();
@@ -732,20 +473,9 @@ mod tests {
         // With id == Some
         let original = DiskOption {
             path: "./rootfs".into(),
-            read_only: false,
-            root: false,
-            sparse: true,
-            direct: false,
-            lock: true,
-            block_size: 512,
             id: Some(*b"BLK\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0"),
-            #[cfg(windows)]
-            io_concurrency: NonZeroU32::new(1).unwrap(),
-            multiple_workers: false,
             async_executor: Some(ExecutorKind::default()),
-            packed_queue: false,
-            bootindex: None,
-            pci_address: None,
+            ..Default::default()
         };
         let json = serde_json::to_string(&original).unwrap();
         let deserialized = serde_json::from_str(&json).unwrap();
@@ -754,20 +484,9 @@ mod tests {
         // With id taking all the available space.
         let original = DiskOption {
             path: "./rootfs".into(),
-            read_only: false,
-            root: false,
-            sparse: true,
-            direct: false,
-            lock: true,
-            block_size: 512,
             id: Some(*b"QWERTYUIOPASDFGHJKL:"),
-            #[cfg(windows)]
-            io_concurrency: NonZeroU32::new(1).unwrap(),
-            multiple_workers: false,
             async_executor: Some(ExecutorKind::default()),
-            packed_queue: false,
-            bootindex: None,
-            pci_address: None,
+            ..Default::default()
         };
         let json = serde_json::to_string(&original).unwrap();
         let deserialized = serde_json::from_str(&json).unwrap();

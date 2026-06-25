@@ -45,6 +45,19 @@ pub struct ScsiOption {
 }
 
 #[cfg(test)]
+impl Default for ScsiOption {
+    fn default() -> Self {
+        Self {
+            path: PathBuf::new(),
+            read_only: false,
+            lock: scsi_option_lock_default(),
+            block_size: scsi_option_block_size_default(),
+            root: false,
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use std::path::Path;
 
@@ -59,10 +72,7 @@ mod tests {
             scsi_option,
             ScsiOption {
                 path: Path::new("/path/to/image").to_path_buf(),
-                read_only: false,
-                lock: scsi_option_lock_default(),
-                block_size: 512,
-                root: false,
+                ..Default::default()
             }
         );
 
@@ -72,9 +82,7 @@ mod tests {
             ScsiOption {
                 path: Path::new("/path/to/image").to_path_buf(),
                 read_only: true,
-                lock: scsi_option_lock_default(),
-                block_size: 512,
-                root: false,
+                ..Default::default()
             }
         );
 
@@ -83,10 +91,8 @@ mod tests {
             scsi_option,
             ScsiOption {
                 path: Path::new("/path/to/image").to_path_buf(),
-                read_only: false,
-                lock: scsi_option_lock_default(),
                 block_size: 1024,
-                root: false,
+                ..Default::default()
             }
         );
 
@@ -96,10 +102,9 @@ mod tests {
             scsi_option,
             ScsiOption {
                 path: Path::new("/path/to/image").to_path_buf(),
-                read_only: false,
-                lock: scsi_option_lock_default(),
                 block_size: 1024,
                 root: true,
+                ..Default::default()
             }
         );
     }
