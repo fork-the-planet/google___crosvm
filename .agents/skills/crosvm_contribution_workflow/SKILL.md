@@ -68,6 +68,9 @@ Use one of the methods described above. Example for quick check:
 tools/dev_container ./tools/presubmit quick
 ```
 
+> [!TIP] If your tests fail on presubmit and you need to debug the tests individually or inspect the
+> VM environment, please refer to the crosvm-testing [SKILL.md](../crosvm_testing/SKILL.md).
+
 ## Uploading Changes
 
 Once your changes are verified and formatted, you can upload them to Gerrit for review.
@@ -152,6 +155,8 @@ Here is the typical sequence of steps for contributing a change:
    ```bash
    tools/dev_container ./tools/presubmit quick
    ```
+   *(If tests fail and you need to debug individually or inspect the VM environment, refer to the
+   crosvm-testing [SKILL.md](../crosvm_testing/SKILL.md)).*
 1. **Commit your changes** (following the [Commit Message Guidelines](#commit-message-guidelines)):
    ```bash
    git commit
