@@ -68,6 +68,20 @@ Use one of the methods described above. Example for quick check:
 tools/dev_container ./tools/presubmit quick
 ```
 
+## Uploading Changes
+
+Once your changes are verified and formatted, you can upload them to Gerrit for review.
+
+We use a custom tool `./tools/cl` for this. The basic command to upload is:
+
+```bash
+./tools/cl upload
+```
+
+> [!TIP] For advanced usage of the CL tool, including rebasing downstream branches, checking CL
+> status, and pruning old branches, see the specialized crosvm-cl-tool
+> [SKILL.md](../crosvm_cl_tool/SKILL.md).
+
 ## Commit Message Guidelines
 
 Refer to these guidelines when writing commit messages for crosvm. You **must** only write a commit
@@ -120,3 +134,31 @@ TEST=tools/presubmit all
 
 Change-Id: I47651060c2ce3a7e9f850b7ed9af8bd035f82de6
 ```
+
+## End-to-End Contribution Journey
+
+Here is the typical sequence of steps for contributing a change:
+
+1. **Start a branch**:
+   ```bash
+   git checkout -b my-feature-branch --track origin/main
+   ```
+1. **Make changes** and implement your feature or fix.
+1. **Format your code**:
+   ```bash
+   tools/dev_container ./tools/fmt
+   ```
+1. **Run presubmit checks**:
+   ```bash
+   tools/dev_container ./tools/presubmit quick
+   ```
+1. **Commit your changes** (following the [Commit Message Guidelines](#commit-message-guidelines)):
+   ```bash
+   git commit
+   ```
+1. **Upload the CL**:
+   ```bash
+   ./tools/cl upload
+   ```
+   *(Refer to the crosvm-cl-tool [SKILL.md](../crosvm_cl_tool/SKILL.md) if you need to add
+   reviewers, trigger try jobs, or rebase).*
