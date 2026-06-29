@@ -21,6 +21,7 @@ use cros_async::Executor;
 use data_model::Le64;
 use vhost::Vhost;
 use vhost::Vsock;
+use vm_memory::GuestAddress;
 use vm_memory::GuestMemory;
 use vmm_vhost::connection::Connection;
 use vmm_vhost::message::VhostUserConfigFlags;
@@ -49,8 +50,42 @@ use crate::virtio::QueueConfig;
 
 const EVENT_QUEUE: usize = NUM_QUEUES - 1;
 
+struct VringConfig {
+    kick_fd: Option<File>,
+    call_fd: Option<File>,
+    err_fd: Option<File>,
+    flags: VhostUserVringAddrFlags,
+    log_addr: Option<GuestAddress>,
+}
+
+impl Default for VringConfig {
+    fn default() -> Self {
+        Self {
+            kick_fd: None,
+            call_fd: None,
+            err_fd: None,
+            flags: VhostUserVringAddrFlags::empty(),
+            log_addr: None,
+        }
+    }
+}
+
+struct VringState {
+    queue: QueueConfig,
+    config: VringConfig,
+}
+
+impl Default for VringState {
+    fn default() -> Self {
+        Self {
+            queue: QueueConfig::new(Queue::MAX_SIZE, 0),
+            config: VringConfig::default(),
+        }
+    }
+}
+
 struct VsockBackend {
-    queues: [QueueConfig; NUM_QUEUES],
+    vrings: [VringState; NUM_QUEUES],
     vmm_maps: Option<Vec<MappingInfo>>,
     mem: Option<GuestMemory>,
 
@@ -96,11 +131,7 @@ impl AsRawDescriptor for VhostUserVsockDevice {
 impl VhostUserDeviceBuilder for VhostUserVsockDevice {
     fn build(self: Box<Self>, _ex: &Executor) -> anyhow::Result<Box<dyn vmm_vhost::Backend>> {
         let backend = VsockBackend {
-            queues: [
-                QueueConfig::new(Queue::MAX_SIZE, 0),
-                QueueConfig::new(Queue::MAX_SIZE, 0),
-                QueueConfig::new(Queue::MAX_SIZE, 0),
-            ],
+            vrings: Default::default(),
             vmm_maps: None,
             mem: None,
             handle: self.handle,
@@ -117,6 +148,110 @@ fn convert_vhost_error(err: vhost::Error) -> Error {
     match err {
         IoctlError(e) => Error::ReqHandlerError(e),
         _ => Error::BackendInternalError,
+    }
+}
+
+fn program_fd<F>(handle: &Vsock, fd: Option<&File>, index: usize, f: F) -> Result<()>
+where
+    F: FnOnce(&Vsock, usize, &Event) -> std::result::Result<(), vhost::Error>,
+{
+    if let Some(file) = fd {
+        let cloned_file = file.try_clone().map_err(Error::ReqHandlerError)?;
+        let event = Event::from(SafeDescriptor::from(cloned_file));
+        f(handle, index, &event).map_err(convert_vhost_error)?;
+    }
+    Ok(())
+}
+
+impl VsockBackend {
+    fn validate_addresses(
+        mem: &GuestMemory,
+        queue_size: u16,
+        desc_addr: GuestAddress,
+        avail_addr: GuestAddress,
+        used_addr: GuestAddress,
+        log_addr: Option<GuestAddress>,
+    ) -> Result<()> {
+        if queue_size == 0 || !queue_size.is_power_of_two() {
+            return Err(Error::InvalidParam("invalid queue size"));
+        }
+
+        let queue_size = usize::from(queue_size);
+
+        let desc_table_size = 16 * queue_size;
+        mem.get_slice_at_addr(desc_addr, desc_table_size)
+            .map_err(|_| Error::InvalidParam("invalid descriptor table address"))?;
+
+        let used_ring_size = 6 + 8 * queue_size;
+        mem.get_slice_at_addr(used_addr, used_ring_size)
+            .map_err(|_| Error::InvalidParam("invalid used ring address"))?;
+
+        let avail_ring_size = 6 + 2 * queue_size;
+        mem.get_slice_at_addr(avail_addr, avail_ring_size)
+            .map_err(|_| Error::InvalidParam("invalid available ring address"))?;
+
+        if let Some(a) = log_addr {
+            mem.get_host_address(a)
+                .map_err(|_| Error::InvalidParam("invalid log address"))?;
+        }
+
+        Ok(())
+    }
+
+    fn program_queues_to_kernel(&mut self) -> Result<()> {
+        let mem = self
+            .mem
+            .as_ref()
+            .ok_or(Error::InvalidParam("program_queues: guest memory not set"))?;
+
+        for index in 0..EVENT_QUEUE {
+            let vring = &self.vrings[index];
+            let queue = &vring.queue;
+            let config = &vring.config;
+
+            self.handle
+                .set_vring_num(index, queue.size())
+                .map_err(convert_vhost_error)?;
+
+            let flags = config.flags;
+            let log_addr = config.log_addr;
+            self.handle
+                .set_vring_addr(
+                    mem,
+                    queue.size(),
+                    index,
+                    flags.bits(),
+                    queue.desc_table(),
+                    queue.used_ring(),
+                    queue.avail_ring(),
+                    log_addr,
+                )
+                .map_err(convert_vhost_error)?;
+
+            self.handle
+                .set_vring_base(index, queue.next_avail().0)
+                .map_err(convert_vhost_error)?;
+
+            program_fd(
+                &self.handle,
+                config.kick_fd.as_ref(),
+                index,
+                Vsock::set_vring_kick,
+            )?;
+            program_fd(
+                &self.handle,
+                config.call_fd.as_ref(),
+                index,
+                Vsock::set_vring_call,
+            )?;
+            program_fd(
+                &self.handle,
+                config.err_fd.as_ref(),
+                index,
+                Vsock::set_vring_err,
+            )?;
+        }
+        Ok(())
     }
 }
 
@@ -186,19 +321,26 @@ impl vmm_vhost::Backend for VsockBackend {
             ));
         }
 
-        // We checked these values already.
         let index = index as usize;
         let num = num as u16;
-        self.queues[index].set_size(num);
 
-        // The last vq is an event-only vq that is not handled by the kernel.
-        if index == EVENT_QUEUE {
-            return Ok(());
+        let vring = &mut self.vrings[index];
+        if vring.queue.used_ring().0 != 0 {
+            let mem = self.mem.as_ref().ok_or(Error::InvalidParam(
+                "set_vring_num: addresses set but no mem table",
+            ))?;
+            Self::validate_addresses(
+                mem,
+                num,
+                vring.queue.desc_table(),
+                vring.queue.avail_ring(),
+                vring.queue.used_ring(),
+                vring.config.log_addr,
+            )?;
         }
 
-        self.handle
-            .set_vring_num(index, num)
-            .map_err(convert_vhost_error)
+        vring.queue.set_size(num);
+        Ok(())
     }
 
     fn set_vring_addr(
@@ -224,32 +366,27 @@ impl vmm_vhost::Backend for VsockBackend {
             "set_vring_addr: could not get vmm_maps",
         ))?;
 
-        let queue = &mut self.queues[index];
-        queue.set_desc_table(vmm_va_to_gpa(maps, descriptor)?);
-        queue.set_avail_ring(vmm_va_to_gpa(maps, available)?);
-        queue.set_used_ring(vmm_va_to_gpa(maps, used)?);
-        let log_addr = if flags.contains(VhostUserVringAddrFlags::VHOST_VRING_F_LOG) {
+        let desc_gpa = vmm_va_to_gpa(maps, descriptor)?;
+        let avail_gpa = vmm_va_to_gpa(maps, available)?;
+        let used_gpa = vmm_va_to_gpa(maps, used)?;
+        let log_gpa = if flags.contains(VhostUserVringAddrFlags::VHOST_VRING_F_LOG) {
             vmm_va_to_gpa(maps, log).map(Some)?
         } else {
             None
         };
 
-        if index == EVENT_QUEUE {
-            return Ok(());
-        }
+        let vring = &mut self.vrings[index];
+        let queue_size = vring.queue.size();
+        Self::validate_addresses(mem, queue_size, desc_gpa, avail_gpa, used_gpa, log_gpa)?;
 
-        self.handle
-            .set_vring_addr(
-                mem,
-                queue.size(),
-                index,
-                flags.bits(),
-                queue.desc_table(),
-                queue.used_ring(),
-                queue.avail_ring(),
-                log_addr,
-            )
-            .map_err(convert_vhost_error)
+        vring.queue.set_desc_table(desc_gpa);
+        vring.queue.set_avail_ring(avail_gpa);
+        vring.queue.set_used_ring(used_gpa);
+
+        vring.config.flags = flags;
+        vring.config.log_addr = log_gpa;
+
+        Ok(())
     }
 
     fn set_vring_base(&mut self, index: u32, base: u32) -> Result<()> {
@@ -260,17 +397,11 @@ impl vmm_vhost::Backend for VsockBackend {
         let index = index as usize;
         let base = base as u16;
 
-        let queue = &mut self.queues[index];
+        let queue = &mut self.vrings[index].queue;
         queue.set_next_avail(Wrapping(base));
         queue.set_next_used(Wrapping(base));
 
-        if index == EVENT_QUEUE {
-            return Ok(());
-        }
-
-        self.handle
-            .set_vring_base(index, base)
-            .map_err(convert_vhost_error)
+        Ok(())
     }
 
     fn get_vring_base(&mut self, index: u32) -> Result<VhostUserVringState> {
@@ -280,7 +411,7 @@ impl vmm_vhost::Backend for VsockBackend {
 
         let index = index as usize;
         let next_avail = if index == EVENT_QUEUE {
-            self.queues[index].next_avail().0
+            self.vrings[index].queue.next_avail().0
         } else {
             self.handle
                 .get_vring_base(index)
@@ -294,16 +425,9 @@ impl vmm_vhost::Backend for VsockBackend {
         if index >= NUM_QUEUES as u8 {
             return Err(Error::InvalidParam("set_vring_kick: index out of range"));
         }
-
         let file = fd.ok_or(Error::InvalidParam("set_vring_kick: missing fd"))?;
-        let event = Event::from(SafeDescriptor::from(file));
         let index = usize::from(index);
-        if index != EVENT_QUEUE {
-            self.handle
-                .set_vring_kick(index, &event)
-                .map_err(convert_vhost_error)?;
-        }
-
+        self.vrings[index].config.kick_fd = Some(file);
         Ok(())
     }
 
@@ -311,16 +435,9 @@ impl vmm_vhost::Backend for VsockBackend {
         if index >= NUM_QUEUES as u8 {
             return Err(Error::InvalidParam("set_vring_call: index out of range"));
         }
-
         let file = fd.ok_or(Error::InvalidParam("set_vring_call: missing fd"))?;
-        let event = Event::from(SafeDescriptor::from(file));
         let index = usize::from(index);
-        if index != EVENT_QUEUE {
-            self.handle
-                .set_vring_call(index, &event)
-                .map_err(convert_vhost_error)?;
-        }
-
+        self.vrings[index].config.call_fd = Some(file);
         Ok(())
     }
 
@@ -328,19 +445,10 @@ impl vmm_vhost::Backend for VsockBackend {
         if index >= NUM_QUEUES as u8 {
             return Err(Error::InvalidParam("set_vring_err: index out of range"));
         }
-
-        let index = usize::from(index);
         let file = fd.ok_or(Error::InvalidParam("set_vring_err: missing fd"))?;
-
-        let event = Event::from(SafeDescriptor::from(file));
-
-        if index == EVENT_QUEUE {
-            return Ok(());
-        }
-
-        self.handle
-            .set_vring_err(index, &event)
-            .map_err(convert_vhost_error)
+        let index = usize::from(index);
+        self.vrings[index].config.err_fd = Some(file);
+        Ok(())
     }
 
     fn set_vring_enable(&mut self, index: u32, enable: bool) -> Result<()> {
@@ -348,14 +456,15 @@ impl vmm_vhost::Backend for VsockBackend {
             return Err(Error::InvalidParam("vring index out of range"));
         }
 
-        self.queues[index as usize].set_ready(enable);
+        self.vrings[index as usize].queue.set_ready(enable);
 
         if index == (EVENT_QUEUE) as u32 {
             return Ok(());
         }
 
-        if self.queues[..EVENT_QUEUE].iter().all(|q| q.ready()) {
+        if self.vrings[..EVENT_QUEUE].iter().all(|v| v.queue.ready()) {
             // All queues are ready.  Start the device.
+            self.program_queues_to_kernel()?;
             self.handle.set_cid(self.cid).map_err(convert_vhost_error)?;
             self.handle.start().map_err(convert_vhost_error)
         } else if !enable {
