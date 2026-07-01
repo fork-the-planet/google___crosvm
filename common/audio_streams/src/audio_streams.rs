@@ -657,7 +657,7 @@ impl NoopStream {
         buffer_size: usize,
     ) -> Self {
         let frame_size = format.sample_bytes() * num_channels;
-        let interval = Duration::from_millis(buffer_size as u64 * 1000 / frame_rate as u64);
+        let interval = Duration::from_nanos(buffer_size as u64 * 1_000_000_000 / frame_rate as u64);
         NoopStream {
             buffer: vec![0; buffer_size * frame_size],
             frame_size,

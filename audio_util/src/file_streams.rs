@@ -55,9 +55,8 @@ pub struct FileStream {
     frame_size: usize,
     /// Length of the current playback buffer in bytes.
     buffer_mem_length: usize,
-
-    /// Duration of an audio in milliseconds for the current `buffer_size`.
-    interval_ms: Duration,
+    /// Duration of audio for the current `buffer_size`.
+    interval: Duration,
     /// Time marker of correct time to return next buffer.
     next_frame: Duration,
     /// Timestamp that records when the stream starts.
@@ -72,7 +71,7 @@ impl FileStream {
         offset: Arc<AtomicUsize>,
         frame_size: usize,
         buffer_mem_length: usize,
-        interval_ms: Duration,
+        interval: Duration,
     ) -> Self {
         let max_offset = memory_mapping.size();
         FileStream {
@@ -81,8 +80,8 @@ impl FileStream {
             frame_size,
             buffer_mem_length,
 
-            interval_ms,
-            next_frame: interval_ms,
+            interval,
+            next_frame: interval,
             start_time: None,
             buffer_drop: FileStreamBufferCommit {
                 frame_size,
@@ -104,10 +103,10 @@ impl AsyncPlaybackBufferStream for FileStream {
             if elapsed < self.next_frame {
                 ex.delay(self.next_frame - elapsed).await?;
             }
-            self.next_frame += self.interval_ms;
+            self.next_frame += self.interval;
         } else {
             self.start_time = Some(Instant::now());
-            self.next_frame = self.interval_ms;
+            self.next_frame = self.interval;
         }
 
         let offset = self.offset.load(Ordering::Relaxed);
@@ -156,7 +155,7 @@ impl StreamSource for FileStreamSource {
         let frame_size = format.sample_bytes() * num_channels;
         let buffer_mem_length = buffer_size * frame_size;
         let memory_mapping = AudioMemoryMapping::new(memory_mapping, buffer_mem_length);
-        let interval_ms = Duration::from_millis(buffer_size as u64 * 1000 / frame_rate as u64);
+        let interval = Duration::from_nanos(buffer_size as u64 * 1_000_000_000 / frame_rate as u64);
         Ok((
             Box::new(NoopStreamControl::new()),
             Box::new(FileStream::new(
@@ -164,7 +163,7 @@ impl StreamSource for FileStreamSource {
                 self.offset.clone(),
                 frame_size,
                 buffer_mem_length,
-                interval_ms,
+                interval,
             )),
         ))
     }

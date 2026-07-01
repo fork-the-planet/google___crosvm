@@ -248,7 +248,7 @@ impl NullShmStream {
         format: SampleFormat,
         frame_rate: u32,
     ) -> Self {
-        let interval = Duration::from_millis(buffer_size as u64 * 1000 / frame_rate as u64);
+        let interval = Duration::from_nanos(buffer_size as u64 * 1_000_000_000 / frame_rate as u64);
         Self {
             num_channels,
             frame_rate,
@@ -553,7 +553,7 @@ pub mod tests {
     fn null_consumption_rate() {
         let frame_rate = 44100;
         let buffer_size = 480;
-        let interval = Duration::from_millis(buffer_size as u64 * 1000 / frame_rate as u64);
+        let interval = Duration::from_nanos(buffer_size as u64 * 1_000_000_000 / frame_rate as u64);
 
         let shm = MockSharedMemory {};
 
