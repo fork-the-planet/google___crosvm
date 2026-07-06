@@ -40,7 +40,6 @@ use rutabaga_gfx::RutabagaMesaHandle;
 #[cfg(windows)]
 use rutabaga_gfx::RutabagaUnsupported;
 use rutabaga_gfx::Transfer3D;
-use rutabaga_gfx::RUTABAGA_HANDLE_TYPE_MEM_DMABUF;
 use rutabaga_gfx::RUTABAGA_HANDLE_TYPE_MEM_OPAQUE_FD;
 use rutabaga_gfx::RUTABAGA_MAP_ACCESS_MASK;
 use rutabaga_gfx::RUTABAGA_MAP_ACCESS_READ;
@@ -57,8 +56,6 @@ use vm_control::gpu::GpuControlCommand;
 use vm_control::gpu::GpuControlResult;
 use vm_control::gpu::MouseMode;
 use vm_control::VmMemorySource;
-use vm_memory::udmabuf::UdmabufDriver;
-use vm_memory::udmabuf::UdmabufDriverTrait;
 use vm_memory::GuestAddress;
 use vm_memory::GuestMemory;
 
@@ -67,7 +64,6 @@ use super::protocol::GpuResponse;
 use super::protocol::GpuResponse::*;
 use super::protocol::GpuResponsePlaneInfo;
 use super::protocol::VirtioGpuResult;
-use super::protocol::VIRTIO_GPU_BLOB_FLAG_CREATE_GUEST_HANDLE;
 use super::protocol::VIRTIO_GPU_BLOB_FLAG_USE_MAPPABLE;
 use super::protocol::VIRTIO_GPU_BLOB_MEM_HOST3D;
 use super::VirtioScanoutBlobData;
@@ -528,7 +524,6 @@ pub struct VirtioGpu {
     resources: Map<u32, VirtioGpuResource>,
     external_blob: bool,
     fixed_blob_mapping: bool,
-    udmabuf_driver: Option<UdmabufDriver>,
     snapshot_scratch_directory: Option<PathBuf>,
     deferred_snapshot_load: Option<VirtioGpuSnapshot>,
 }
@@ -543,7 +538,6 @@ pub struct VirtioGpu {
 //   * rutabaga: re-initialized from scatch using the resource snapshots
 //   * resources: snapshot'd
 //   * external_blob: not needed for 2d mode
-//   * udmabuf_driver: not needed for 2d mode
 #[derive(Serialize, Deserialize)]
 pub struct VirtioGpuSnapshot {
     scanouts: Map<u32, VirtioGpuScanoutSnapshot>,
@@ -604,18 +598,8 @@ impl VirtioGpu {
         mapper: Arc<Mutex<Option<Box<dyn SharedMemoryMapper>>>>,
         external_blob: bool,
         fixed_blob_mapping: bool,
-        udmabuf: bool,
         snapshot_scratch_directory: Option<PathBuf>,
     ) -> Option<VirtioGpu> {
-        let mut udmabuf_driver = None;
-        if udmabuf {
-            udmabuf_driver = Some(
-                UdmabufDriver::new()
-                    .map_err(|e| error!("failed to initialize udmabuf: {}", e))
-                    .ok()?,
-            );
-        }
-
         let scanouts = display_params
             .iter()
             .enumerate()
@@ -638,7 +622,6 @@ impl VirtioGpu {
             resources: Default::default(),
             external_blob,
             fixed_blob_mapping,
-            udmabuf_driver,
             deferred_snapshot_load: None,
             snapshot_scratch_directory,
         })
@@ -1106,15 +1089,9 @@ impl VirtioGpu {
         vecs: Vec<(GuestAddress, usize)>,
         mem: &GuestMemory,
     ) -> VirtioGpuResult {
-        let mut descriptor = None;
         let mut rutabaga_iovecs = None;
 
-        if resource_create_blob.blob_flags & VIRTIO_GPU_BLOB_FLAG_CREATE_GUEST_HANDLE != 0 {
-            descriptor = match self.udmabuf_driver {
-                Some(ref driver) => Some(driver.create_udmabuf(mem, &vecs[..])?),
-                None => return Err(ErrUnspec),
-            }
-        } else if resource_create_blob.blob_mem != VIRTIO_GPU_BLOB_MEM_HOST3D {
+        if resource_create_blob.blob_mem != VIRTIO_GPU_BLOB_MEM_HOST3D {
             rutabaga_iovecs =
                 Some(sglist_to_rutabaga_iovecs(&vecs[..], mem).map_err(|_| ErrUnspec)?);
         }
@@ -1124,13 +1101,7 @@ impl VirtioGpu {
             resource_id,
             resource_create_blob,
             rutabaga_iovecs,
-            descriptor.map(|descriptor| {
-                RutabagaMesaHandle {
-                    os_handle: to_rutabaga_descriptor(descriptor),
-                    handle_type: RUTABAGA_HANDLE_TYPE_MEM_DMABUF,
-                }
-                .into()
-            }),
+            None,
         )?;
 
         let guest_cpu_mappable =

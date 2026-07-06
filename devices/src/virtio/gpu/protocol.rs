@@ -24,7 +24,6 @@ use gpu_display::GpuDisplayError;
 use remain::sorted;
 use rutabaga_gfx::RutabagaError;
 use thiserror::Error;
-use vm_memory::udmabuf::UdmabufError;
 use zerocopy::FromBytes;
 use zerocopy::Immutable;
 use zerocopy::IntoBytes;
@@ -32,9 +31,7 @@ use zerocopy::KnownLayout;
 
 pub use super::super::device_constants::gpu::virtio_gpu_config;
 pub use super::super::device_constants::gpu::VIRTIO_GPU_F_CONTEXT_INIT;
-pub use super::super::device_constants::gpu::VIRTIO_GPU_F_CREATE_GUEST_HANDLE;
 pub use super::super::device_constants::gpu::VIRTIO_GPU_F_EDID;
-pub use super::super::device_constants::gpu::VIRTIO_GPU_F_FENCE_PASSING;
 pub use super::super::device_constants::gpu::VIRTIO_GPU_F_RESOURCE_BLOB;
 pub use super::super::device_constants::gpu::VIRTIO_GPU_F_RESOURCE_UUID;
 pub use super::super::device_constants::gpu::VIRTIO_GPU_F_VIRGL;
@@ -768,7 +765,6 @@ pub enum GpuResponse {
     ErrInvalidResourceId,
     ErrInvalidContextId,
     ErrInvalidParameter,
-    ErrUdmabuf(UdmabufError),
 }
 
 impl From<TubeError> for GpuResponse {
@@ -786,12 +782,6 @@ impl From<RutabagaError> for GpuResponse {
 impl From<GpuDisplayError> for GpuResponse {
     fn from(e: GpuDisplayError) -> GpuResponse {
         GpuResponse::ErrDisplay(e)
-    }
-}
-
-impl From<UdmabufError> for GpuResponse {
-    fn from(e: UdmabufError) -> GpuResponse {
-        GpuResponse::ErrUdmabuf(e)
     }
 }
 
@@ -819,7 +809,6 @@ impl Display for GpuResponse {
             ErrInvalidResourceId => write!(f, "invalid resource id"),
             ErrInvalidContextId => write!(f, "invalid context id"),
             ErrInvalidParameter => write!(f, "invalid parameter"),
-            ErrUdmabuf(e) => write!(f, "udmabuf error: {e}"),
         }
     }
 }
@@ -991,7 +980,6 @@ impl GpuResponse {
             GpuResponse::ErrBase(_) => VIRTIO_GPU_RESP_ERR_UNSPEC,
             GpuResponse::ErrRutabaga(_) => VIRTIO_GPU_RESP_ERR_UNSPEC,
             GpuResponse::ErrDisplay(_) => VIRTIO_GPU_RESP_ERR_UNSPEC,
-            GpuResponse::ErrUdmabuf(_) => VIRTIO_GPU_RESP_ERR_UNSPEC,
             GpuResponse::ErrScanout { num_scanouts: _ } => VIRTIO_GPU_RESP_ERR_UNSPEC,
             GpuResponse::ErrEdid(_) => VIRTIO_GPU_RESP_ERR_UNSPEC,
             GpuResponse::ErrOutOfMemory => VIRTIO_GPU_RESP_ERR_OUT_OF_MEMORY,
