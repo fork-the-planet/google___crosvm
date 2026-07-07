@@ -148,33 +148,13 @@ impl Frontend for BackendReqHandlerImpl {
             })
     }
 
-    fn external_map(&mut self, req: &VhostUserExternalMapMsg) -> HandlerResult<()> {
-        let shared_mapper_state = self
-            .shared_mapper_state
-            .as_mut()
-            .ok_or_else(|| std::io::Error::from_raw_os_error(libc::EINVAL))?;
-        if req.shmid != shared_mapper_state.shmid {
-            error!(
-                "bad shmid {}, expected {}",
-                req.shmid, shared_mapper_state.shmid
-            );
-            return Err(std::io::Error::from_raw_os_error(libc::EINVAL));
-        }
-        shared_mapper_state
-            .mapper
-            .add_mapping(
-                VmMemorySource::ExternalMapping {
-                    ptr: req.ptr,
-                    size: req.len,
-                },
-                req.shm_offset,
-                Protection::read_write(),
-                MemCacheType::CacheCoherent,
-            )
-            .map_err(|e| {
-                error!("failed to create mapping {:?}", e);
-                std::io::Error::other(e.context("add external mapping"))
-            })
+    fn external_map(&mut self, _req: &VhostUserExternalMapMsg) -> HandlerResult<()> {
+        // A raw virtual address from another process is meaningless here. Honoring it would map
+        // main-process memory at an attacker-chosen address into the guest. Backends that need this
+        // must be in-process or must send a descriptor (SHMEM_MAP / GPU_MAP) instead.
+        // See b/518041059 for details.
+        error!("rejecting cross-process EXTERNAL_MAP (ptr is backend-local)");
+        Err(std::io::Error::from_raw_os_error(libc::ENOTSUP))
     }
 
     fn handle_config_change(&mut self) -> HandlerResult<()> {
