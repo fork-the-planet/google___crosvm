@@ -396,8 +396,7 @@ verify_builder(
         swarming.cache("builder", name = "linux_builder_cache"),
     ],
     category = "android",
-    # TODO(b/349907813): Enable in presubmit once stabilized
-    presubmit = False,
+    presubmit = True,
 )
 
 infra_builder(

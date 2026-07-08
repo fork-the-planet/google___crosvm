@@ -71,6 +71,7 @@ use base::Descriptor;
 use base::Error as SysError;
 use base::Event;
 use base::ExternalMapping;
+#[cfg(feature = "gpu")]
 use base::IntoRawDescriptor;
 use base::MappedRegion;
 use base::MemoryMappingBuilder;
@@ -495,6 +496,7 @@ impl VmMemorySource {
             VmMemorySource::SharedMemory(shm) => {
                 (map_descriptor(&shm, 0, shm.size(), prot)?, shm.size(), None)
             }
+            #[cfg(feature = "gpu")]
             VmMemorySource::Vulkan {
                 descriptor,
                 handle_type,
@@ -503,13 +505,11 @@ impl VmMemorySource {
                 driver_uuid,
                 size,
             } => {
-                #[cfg(feature = "gpu")]
-                {
-                    let device_id = rutabaga_gfx::DeviceId {
-                        device_uuid,
-                        driver_uuid,
-                    };
-                    let mapped_region = gralloc
+                let device_id = rutabaga_gfx::DeviceId {
+                    device_uuid,
+                    driver_uuid,
+                };
+                let mapped_region = gralloc
                         .import_and_map(
                             RutabagaMesaHandle {
                                 os_handle: to_rutabaga_desciptor(descriptor),
@@ -527,11 +527,12 @@ impl VmMemorySource {
                                 size: {size}"
                             )
                         })?;
-                    let mapped_region: Box<dyn MappedRegion> =
-                        Box::new(RutabagaMemoryRegion::new(mapped_region));
-                    (mapped_region, size, None)
-                }
-                #[cfg(not(feature = "gpu"))]
+                let mapped_region: Box<dyn MappedRegion> =
+                    Box::new(RutabagaMemoryRegion::new(mapped_region));
+                (mapped_region, size, None)
+            }
+            #[cfg(not(feature = "gpu"))]
+            VmMemorySource::Vulkan { .. } => {
                 return Err(anyhow::anyhow!(
                     "vulkan mapping is not supported without GPU feature"
                 ));
