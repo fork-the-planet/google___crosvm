@@ -1263,6 +1263,7 @@ fn run_control(
     host_cpu_topology: bool,
     tsc_sync_mitigations: TscSyncMitigations,
     force_calibrated_tsc_leaf: bool,
+    nested: hypervisor::NestedMode,
     mut product_args: RunControlArgs,
     restore_path: Option<PathBuf>,
     control_server_path: Option<PathBuf>,
@@ -1423,6 +1424,7 @@ fn run_control(
         run_mode_arc.clone(),
         tsc_sync_mitigations,
         force_calibrated_tsc_leaf,
+        nested,
     )?;
 
     // See comment on `VmRequest::execute`.
@@ -1878,7 +1880,18 @@ fn create_whpx_vm(
     no_smt: bool,
     apic_emulation: bool,
     force_calibrated_tsc_leaf: bool,
+    nested: hypervisor::NestedMode,
 ) -> Result<Arc<WhpxVm>> {
+    // WHPX guests never get nested virtualization (crosvm does not enable the
+    // NestedVirtualization partition property), so requiring it cannot be
+    // satisfied.
+    //
+    // TODO: support it by enabling the WHvPartitionPropertyCodeNestedVirtualization
+    // partition property and deriving the outcome of `on`/`auto` from it.
+    if nested == hypervisor::NestedMode::On {
+        bail!("nested virtualization is not supported on WHPX");
+    }
+
     let cpu_config = hypervisor::CpuConfigX86_64::new(
         force_calibrated_tsc_leaf,
         false, /* host_cpu_topology */
@@ -1886,6 +1899,7 @@ fn create_whpx_vm(
         no_smt,
         false, /* itmt */
         None,  /* hybrid_type */
+        nested,
     );
 
     // context for non-cpu-specific cpuid results
@@ -2327,6 +2341,7 @@ fn run_config_inner(
                 no_smt,
                 apic_emulation_supported && irq_chip == IrqChipKind::Split,
                 cfg.force_calibrated_tsc_leaf,
+                cfg.nested.mode,
             )?;
 
             let irq_chip: Arc<dyn IrqChipArch> = match irq_chip {
@@ -2637,6 +2652,7 @@ fn run_vm(
         cfg.host_cpu_topology,
         tsc_sync_mitigations,
         cfg.force_calibrated_tsc_leaf,
+        cfg.nested.mode,
         product_args,
         cfg.restore_path,
         cfg.socket_path,

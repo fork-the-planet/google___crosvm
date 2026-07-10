@@ -57,6 +57,8 @@ use devices::PflashParameters;
 use devices::StubPciParameters;
 #[cfg(target_arch = "x86_64")]
 use hypervisor::CpuHybridType;
+#[cfg(target_arch = "x86_64")]
+use hypervisor::NestedMode;
 use hypervisor::ProtectionType;
 use jail::JailConfig;
 use resources::AddressRange;
@@ -160,6 +162,16 @@ pub struct CpuOptions {
     /// Scalable Vector Extension.
     #[cfg(target_arch = "aarch64")]
     pub sve: Option<SveConfig>,
+}
+
+/// Nested virtualization configuration.
+#[cfg(target_arch = "x86_64")]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, FromKeyValues)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct NestedConfig {
+    /// Nested virtualization exposure policy.
+    #[serde(default)]
+    pub mode: NestedMode,
 }
 
 /// Device tree overlay configuration.
@@ -694,6 +706,8 @@ pub struct Config {
     #[cfg(target_arch = "aarch64")]
     pub mte: bool,
     pub name: Option<String>,
+    #[cfg(target_arch = "x86_64")]
+    pub nested: NestedConfig,
     #[cfg(feature = "net")]
     pub net: Vec<NetParameters>,
     #[cfg(windows)]
@@ -936,6 +950,8 @@ impl Default for Config {
             #[cfg(target_arch = "aarch64")]
             mte: false,
             name: None,
+            #[cfg(target_arch = "x86_64")]
+            nested: NestedConfig::default(),
             #[cfg(feature = "net")]
             net: Vec::new(),
             #[cfg(windows)]
@@ -1414,6 +1430,29 @@ mod tests {
                 ..Default::default()
             }
         );
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn parse_nested_config() {
+        for (arg, mode) in [
+            ("off", NestedMode::Off),
+            ("auto", NestedMode::Auto),
+            ("on", NestedMode::On),
+            ("mode=off", NestedMode::Off),
+            ("mode=auto", NestedMode::Auto),
+            ("mode=on", NestedMode::On),
+        ] {
+            assert_eq!(
+                from_key_values::<NestedConfig>(arg).unwrap(),
+                NestedConfig { mode }
+            );
+        }
+        assert_eq!(NestedConfig::default().mode, NestedMode::Auto);
+
+        from_key_values::<NestedConfig>("maybe").unwrap_err();
+        from_key_values::<NestedConfig>("mode=maybe").unwrap_err();
+        from_key_values::<NestedConfig>("bogus=true").unwrap_err();
     }
 
     #[test]

@@ -27,6 +27,7 @@ use crate::Hypervisor;
 use crate::IrqRoute;
 use crate::IrqSource;
 use crate::IrqSourceChip;
+use crate::NestedMode;
 use crate::Vcpu;
 use crate::Vm;
 
@@ -366,6 +367,9 @@ pub struct CpuConfigX86_64 {
 
     /// whether setting hybrid CPU type
     pub hybrid_type: Option<CpuHybridType>,
+
+    /// how to expose nested virtualization to the guest.
+    pub nested: NestedMode,
 }
 
 impl CpuConfigX86_64 {
@@ -376,6 +380,7 @@ impl CpuConfigX86_64 {
         no_smt: bool,
         itmt: bool,
         hybrid_type: Option<CpuHybridType>,
+        nested: NestedMode,
     ) -> Self {
         CpuConfigX86_64 {
             force_calibrated_tsc_leaf,
@@ -384,6 +389,7 @@ impl CpuConfigX86_64 {
             no_smt,
             itmt,
             hybrid_type,
+            nested,
         }
     }
 }

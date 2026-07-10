@@ -4034,6 +4034,7 @@ fn run_control(
             cfg.no_smt,
             cfg.itmt,
             vcpu_hybrid_type,
+            cfg.nested.mode,
         ));
         #[cfg(target_arch = "x86_64")]
         let bus_lock_ratelimit_ctrl = Arc::clone(&bus_lock_ratelimit_ctrl);

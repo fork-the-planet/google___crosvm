@@ -693,6 +693,19 @@ impl ProtectionType {
     }
 }
 
+/// Nested virtualization exposure policy.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum NestedMode {
+    /// Hide it from the guest.
+    Off,
+    /// Expose it if the host supports it.
+    #[default]
+    Auto,
+    /// Require it, failing to start the VM if the host cannot back it.
+    On,
+}
+
 #[derive(Clone, Copy)]
 pub struct Config {
     #[cfg(target_arch = "aarch64")]

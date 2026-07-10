@@ -167,6 +167,7 @@ impl VcpuRunThread {
         no_smt: bool,
         host_cpu_topology: bool,
         force_calibrated_tsc_leaf: bool,
+        nested: hypervisor::NestedMode,
     ) -> Result<RunnableVcpuInfo> {
         let vcpu = match vcpu {
             Some(v) => v,
@@ -196,6 +197,7 @@ impl VcpuRunThread {
             no_smt,
             false, /* itmt */
             None,  /* hybrid_type */
+            nested,
         ));
 
         #[cfg(target_arch = "aarch64")]
@@ -259,6 +261,7 @@ impl VcpuRunThread {
         host_cpu_topology: bool,
         tsc_offset: Option<u64>,
         force_calibrated_tsc_leaf: bool,
+        nested: hypervisor::NestedMode,
         vcpu_control: mpsc::Receiver<VcpuControl>,
     ) -> Result<JoinHandle<Result<()>>> {
         let context = self.clone();
@@ -281,6 +284,7 @@ impl VcpuRunThread {
                         no_smt,
                         host_cpu_topology,
                         force_calibrated_tsc_leaf,
+                        nested,
                     );
 
                     #[cfg(target_arch = "x86_64")]
@@ -291,6 +295,7 @@ impl VcpuRunThread {
                         no_smt,
                         false, /* itmt */
                         None,  /* hybrid_type */
+                        nested,
                     );
 
                     #[cfg(target_arch = "x86_64")]
@@ -538,6 +543,7 @@ pub fn run_all_vcpus(
     run_mode_arc: Arc<VcpuRunMode>,
     tsc_sync_mitigations: TscSyncMitigations,
     force_calibrated_tsc_leaf: bool,
+    nested: hypervisor::NestedMode,
 ) -> Result<(Vec<JoinHandle<Result<()>>>, Vec<mpsc::Sender<VcpuControl>>)> {
     let mut vcpu_threads = Vec::with_capacity(guest_os.vcpu_count + 1);
     let mut vcpu_control_channels = Vec::with_capacity(guest_os.vcpu_count);
@@ -611,6 +617,7 @@ pub fn run_all_vcpus(
             host_cpu_topology,
             tsc_offset,
             force_calibrated_tsc_leaf,
+            nested,
             vcpu_control_recv,
         )?;
         if let Some(ref mut monitor) = stall_monitor {

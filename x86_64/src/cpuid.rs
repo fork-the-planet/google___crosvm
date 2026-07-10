@@ -16,6 +16,7 @@ use hypervisor::CpuHybridType;
 use hypervisor::CpuIdEntry;
 use hypervisor::HypervisorCap;
 use hypervisor::HypervisorX86_64;
+use hypervisor::NestedMode;
 use hypervisor::VcpuX86_64;
 use remain::sorted;
 use thiserror::Error;
@@ -27,6 +28,8 @@ use crate::CpuManufacturer;
 pub enum Error {
     #[error("GetSupportedCpus ioctl failed: {0}")]
     GetSupportedCpusFailed(base::Error),
+    #[error("nested virtualization requested, but not supported by the host")]
+    NestedVirtUnsupported,
     #[error("SetSupportedCpus ioctl failed: {0}")]
     SetSupportedCpusFailed(base::Error),
 }
@@ -39,6 +42,7 @@ pub const EBX_CLFLUSH_SIZE_SHIFT: u32 = 8; // Bytes flushed when executing CLFLU
 pub const EBX_CPU_COUNT_SHIFT: u32 = 16; // Index of this CPU.
 pub const EBX_CPUID_SHIFT: u32 = 24; // Index of this CPU.
 pub const ECX_EPB_SHIFT: u32 = 3; // "Energy Performance Bias" bit.
+pub const ECX_VMX_SHIFT: u32 = 5; // Intel VT-x (VMX) supported (leaf 1 ECX).
 pub const ECX_X2APIC_SHIFT: u32 = 21; // APIC supports extended xAPIC (x2APIC) standard.
 pub const ECX_TSC_DEADLINE_TIMER_SHIFT: u32 = 24; // TSC deadline mode of APIC timer.
 pub const ECX_HYPERVISOR_SHIFT: u32 = 31; // Flag to be set when the cpu is running on a hypervisor.
@@ -47,6 +51,7 @@ pub const ECX_TOPO_TYPE_SHIFT: u32 = 8; // Topology Level type.
 pub const ECX_TOPO_SMT_TYPE: u32 = 1; // SMT type.
 pub const ECX_TOPO_CORE_TYPE: u32 = 2; // CORE type.
 pub const ECX_HCFC_PERF_SHIFT: u32 = 0; // Presence of IA32_MPERF and IA32_APERF.
+pub const ECX_SVM_SHIFT: u32 = 2; // AMD SVM supported (extended leaf 0x80000001 ECX).
 pub const EAX_CPU_CORES_SHIFT: u32 = 26; // Index of cpu cores in the same physical package.
 pub const EDX_HYBRID_CPU_SHIFT: u32 = 15; // Hybrid. The processor is identified as a hybrid part.
 pub const EAX_HWP_SHIFT: u32 = 7; // Intel Hardware P-states.
@@ -112,6 +117,26 @@ impl CpuIdContext {
     }
 }
 
+/// Whether `entries` advertise the nested virtualization feature for the
+/// host's own vendor: VMX on Intel, SVM on AMD.
+fn nested_feature_available(entries: &[CpuIdEntry], manufacturer: CpuManufacturer) -> bool {
+    match manufacturer {
+        CpuManufacturer::Intel => cpuid_ecx_bit_set(entries, 1, ECX_VMX_SHIFT),
+        CpuManufacturer::Amd => cpuid_ecx_bit_set(entries, 0x80000001, ECX_SVM_SHIFT),
+        CpuManufacturer::Unknown => {
+            cpuid_ecx_bit_set(entries, 1, ECX_VMX_SHIFT)
+                || cpuid_ecx_bit_set(entries, 0x80000001, ECX_SVM_SHIFT)
+        }
+    }
+}
+
+/// Whether any entry for `leaf` has the `ecx` bit at `shift` set.
+fn cpuid_ecx_bit_set(entries: &[CpuIdEntry], leaf: u32, shift: u32) -> bool {
+    entries
+        .iter()
+        .any(|e| e.function == leaf && e.index == 0 && e.cpuid.ecx & (1 << shift) != 0)
+}
+
 /// Adjust a CPUID instruction result to return values that work with crosvm.
 ///
 /// Given an input CpuIdEntry `entry`, which represents what the Hypervisor would normally return
@@ -138,6 +163,11 @@ pub fn adjust_cpuid(entry: &mut CpuIdEntry, ctx: &CpuIdContext) {
             }
             if ctx.tsc_deadline_timer {
                 entry.cpuid.ecx |= 1 << ECX_TSC_DEADLINE_TIMER_SHIFT;
+            }
+
+            // Hide Intel VMX (nested virtualization) from the guest when off.
+            if ctx.cpu_config.nested == NestedMode::Off {
+                entry.cpuid.ecx &= !(1 << ECX_VMX_SHIFT);
             }
 
             if ctx.cpu_config.host_cpu_topology {
@@ -281,13 +311,19 @@ pub fn adjust_cpuid(entry: &mut CpuIdEntry, ctx: &CpuIdContext) {
                 entry.cpuid.ecx = 0;
             }
         }
+        0x80000001 => {
+            // Hide AMD SVM (nested virtualization) from the guest when off.
+            if ctx.cpu_config.nested == NestedMode::Off {
+                entry.cpuid.ecx &= !(1 << ECX_SVM_SHIFT);
+            }
+        }
         _ => (),
     }
 }
 
 /// Adjust all the entries in `cpuid` based on crosvm's cpuid logic and `ctx`. Calls `adjust_cpuid`
 /// on each entry in `cpuid`, and adds any entries that should exist and are missing from `cpuid`.
-pub fn filter_cpuid(cpuid: &mut hypervisor::CpuId, ctx: &CpuIdContext) {
+fn filter_cpuid(cpuid: &mut hypervisor::CpuId, ctx: &CpuIdContext) {
     // Add an empty leaf 0x15 if we have a tsc_frequency and it's not in the current set of leaves.
     // It will be filled with the appropriate frequency information by `adjust_cpuid`.
     if ctx.tsc_frequency.is_some()
@@ -325,7 +361,7 @@ pub fn filter_cpuid(cpuid: &mut hypervisor::CpuId, ctx: &CpuIdContext) {
 /// * `vcpu` - `VcpuX86_64` for setting CPU ID.
 /// * `vcpu_id` - The vcpu index of `vcpu`.
 /// * `cpu_config` - CPU feature configurations.
-pub fn setup_cpuid(
+pub(crate) fn setup_cpuid(
     hypervisor: &dyn HypervisorX86_64,
     irq_chip: &dyn IrqChipX86_64,
     vcpu: &dyn VcpuX86_64,
@@ -337,18 +373,22 @@ pub fn setup_cpuid(
         .get_supported_cpuid()
         .map_err(Error::GetSupportedCpusFailed)?;
 
-    filter_cpuid(
-        &mut cpuid,
-        &CpuIdContext::new(
-            vcpu_id,
-            vcpu_count,
-            Some(irq_chip),
-            cpu_config,
-            hypervisor.check_capability(HypervisorCap::CalibratedTscLeafRequired),
-            __cpuid_count,
-            __cpuid,
-        ),
+    let ctx = CpuIdContext::new(
+        vcpu_id,
+        vcpu_count,
+        Some(irq_chip),
+        cpu_config,
+        hypervisor.check_capability(HypervisorCap::CalibratedTscLeafRequired),
+        __cpuid_count,
+        __cpuid,
     );
+    filter_cpuid(&mut cpuid, &ctx);
+
+    if ctx.cpu_config.nested == NestedMode::On
+        && !nested_feature_available(&cpuid.cpu_id_entries, cpu_manufacturer())
+    {
+        return Err(Error::NestedVirtUnsupported);
+    }
 
     vcpu.set_cpuid(&cpuid)
         .map_err(Error::SetSupportedCpusFailed)
@@ -379,6 +419,9 @@ pub fn cpu_manufacturer() -> CpuManufacturer {
 mod tests {
     use super::*;
 
+    const VMX_LEAF: u32 = 1;
+    const SVM_LEAF: u32 = 0x80000001;
+
     #[test]
     fn cpu_manufacturer_test() {
         // this should be amd or intel. We don't support other processors for virtualization.
@@ -386,39 +429,65 @@ mod tests {
         assert_ne!(manufacturer, CpuManufacturer::Unknown);
     }
 
-    #[test]
-    fn cpuid_copies_register() {
-        let fake_cpuid_count = |_function: u32, _index: u32| CpuidResult {
+    fn fake_cpuid_count(_function: u32, _index: u32) -> CpuidResult {
+        CpuidResult {
             eax: 27,
             ebx: 18,
             ecx: 28,
             edx: 18,
-        };
-        let fake_cpuid = |_function: u32| CpuidResult {
-            eax: 0,
-            ebx: 0,
-            ecx: 0,
-            edx: 0,
-        };
-        let cpu_config = CpuConfigX86_64 {
-            force_calibrated_tsc_leaf: false,
-            host_cpu_topology: true,
-            enable_hwp: false,
-            no_smt: false,
-            itmt: false,
-            hybrid_type: None,
-        };
-        let ctx = CpuIdContext {
+        }
+    }
+
+    fn fake_cpuid(function: u32) -> CpuidResult {
+        fake_cpuid_count(function, 0)
+    }
+
+    fn test_ctx(nested: NestedMode) -> CpuIdContext {
+        CpuIdContext {
             vcpu_id: 0,
-            vcpu_count: 0,
+            vcpu_count: 1,
             x2apic: false,
             tsc_deadline_timer: false,
             apic_frequency: 0,
             tsc_frequency: None,
-            cpu_config,
+            cpu_config: CpuConfigX86_64 {
+                force_calibrated_tsc_leaf: false,
+                host_cpu_topology: true,
+                enable_hwp: false,
+                no_smt: false,
+                itmt: false,
+                hybrid_type: None,
+                nested,
+            },
             cpuid_count: fake_cpuid_count,
             cpuid: fake_cpuid,
-        };
+        }
+    }
+
+    fn ecx_entry(leaf: u32, ecx: u32) -> CpuIdEntry {
+        CpuIdEntry {
+            function: leaf,
+            index: 0,
+            flags: 0,
+            cpuid: CpuidResult {
+                eax: 0,
+                ebx: 0,
+                ecx,
+                edx: 0,
+            },
+        }
+    }
+
+    fn adjusted_ecx(mode: NestedMode, leaf: u32, ecx: u32) -> u32 {
+        let ctx = test_ctx(mode);
+        let mut entry = ecx_entry(leaf, ecx);
+        adjust_cpuid(&mut entry, &ctx);
+        entry.cpuid.ecx
+    }
+
+    #[test]
+    fn cpuid_copies_register() {
+        let ctx = test_ctx(NestedMode::Auto);
         let mut cpu_id_entry = CpuIdEntry {
             function: 0x4,
             index: 0,
@@ -432,5 +501,72 @@ mod tests {
         };
         adjust_cpuid(&mut cpu_id_entry, &ctx);
         assert_eq!(cpu_id_entry.cpuid.eax, 27)
+    }
+
+    #[test]
+    fn nested_off_clears_vmx_and_svm() {
+        let vmx = 1u32 << ECX_VMX_SHIFT;
+        assert_eq!(adjusted_ecx(NestedMode::Off, VMX_LEAF, vmx) & vmx, 0);
+        let svm = 1u32 << ECX_SVM_SHIFT;
+        assert_eq!(adjusted_ecx(NestedMode::Off, SVM_LEAF, svm) & svm, 0);
+    }
+
+    #[test]
+    fn nested_on_keeps_host_vmx_and_svm() {
+        let vmx = 1u32 << ECX_VMX_SHIFT;
+        assert_eq!(adjusted_ecx(NestedMode::On, VMX_LEAF, vmx) & vmx, vmx);
+        assert_eq!(adjusted_ecx(NestedMode::On, VMX_LEAF, 0) & vmx, 0);
+        let svm = 1u32 << ECX_SVM_SHIFT;
+        assert_eq!(adjusted_ecx(NestedMode::On, SVM_LEAF, svm) & svm, svm);
+        assert_eq!(adjusted_ecx(NestedMode::On, SVM_LEAF, 0) & svm, 0);
+    }
+
+    #[test]
+    fn nested_auto_keeps_host_vmx_and_svm() {
+        let vmx = 1u32 << ECX_VMX_SHIFT;
+        assert_eq!(adjusted_ecx(NestedMode::Auto, VMX_LEAF, vmx) & vmx, vmx);
+        assert_eq!(adjusted_ecx(NestedMode::Auto, VMX_LEAF, 0) & vmx, 0);
+        let svm = 1u32 << ECX_SVM_SHIFT;
+        assert_eq!(adjusted_ecx(NestedMode::Auto, SVM_LEAF, svm) & svm, svm);
+        assert_eq!(adjusted_ecx(NestedMode::Auto, SVM_LEAF, 0) & svm, 0);
+    }
+
+    #[test]
+    fn nested_required_intel_needs_vmx() {
+        let with_vmx = [ecx_entry(VMX_LEAF, 1 << ECX_VMX_SHIFT)];
+        assert!(nested_feature_available(&with_vmx, CpuManufacturer::Intel));
+        let with_svm = [ecx_entry(SVM_LEAF, 1 << ECX_SVM_SHIFT)];
+        assert!(!nested_feature_available(&with_svm, CpuManufacturer::Intel));
+    }
+
+    #[test]
+    fn nested_required_amd_needs_svm() {
+        let with_svm = [ecx_entry(SVM_LEAF, 1 << ECX_SVM_SHIFT)];
+        assert!(nested_feature_available(&with_svm, CpuManufacturer::Amd));
+        let with_vmx = [ecx_entry(VMX_LEAF, 1 << ECX_VMX_SHIFT)];
+        assert!(!nested_feature_available(&with_vmx, CpuManufacturer::Amd));
+    }
+
+    #[test]
+    fn nested_required_unknown_vendor_accepts_either() {
+        let with_vmx = [ecx_entry(VMX_LEAF, 1 << ECX_VMX_SHIFT)];
+        assert!(nested_feature_available(
+            &with_vmx,
+            CpuManufacturer::Unknown
+        ));
+        let with_svm = [ecx_entry(SVM_LEAF, 1 << ECX_SVM_SHIFT)];
+        assert!(nested_feature_available(
+            &with_svm,
+            CpuManufacturer::Unknown
+        ));
+        let none = [ecx_entry(VMX_LEAF, 0), ecx_entry(SVM_LEAF, 0)];
+        assert!(!nested_feature_available(&none, CpuManufacturer::Unknown));
+    }
+
+    #[test]
+    fn nested_required_absent_when_host_lacks_it() {
+        let none = [ecx_entry(VMX_LEAF, 0), ecx_entry(SVM_LEAF, 0)];
+        assert!(!nested_feature_available(&none, CpuManufacturer::Intel));
+        assert!(!nested_feature_available(&none, CpuManufacturer::Amd));
     }
 }
