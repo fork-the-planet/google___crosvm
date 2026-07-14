@@ -95,7 +95,7 @@ use crate::crosvm::config::HypervisorKind;
 use crate::crosvm::config::InputDeviceOption;
 use crate::crosvm::config::IrqChipKind;
 use crate::crosvm::config::MemOptions;
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 use crate::crosvm::config::NestedConfig;
 use crate::crosvm::config::TouchDeviceOption;
 use crate::crosvm::config::VhostUserFrontendOption;
@@ -1433,7 +1433,7 @@ pub struct RunCommand {
     /// is no-op on Windows and MacOS at the moment.
     pub name: Option<String>,
 
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     #[argh(option, arg_name = "[mode=]off|auto|on")]
     /// nested virtualization support.
     ///
@@ -1446,7 +1446,9 @@ pub struct RunCommand {
     /// Per-architecture support:
     ///     x86_64  - controls the guest's VMX (Intel) / SVM (AMD)
     ///         CPUID feature bits (default: auto).
-    ///     aarch64 - not supported.
+    ///     aarch64 - boots the guest at virtual EL2 (FEAT_NV2, E2H=1, VHE),
+    ///         so it can run its own guests. Requires a GICv3 irqchip
+    ///         (default: off).
     ///     riscv64 - not supported.
     pub nested: Option<NestedConfig>,
 
@@ -2297,7 +2299,7 @@ impl TryFrom<RunCommand> for super::config::Config {
             cfg.bus_lock_ratelimit = p;
         }
 
-        #[cfg(target_arch = "x86_64")]
+        #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
         {
             cfg.nested = cmd.nested.unwrap_or_default();
         }

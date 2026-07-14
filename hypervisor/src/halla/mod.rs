@@ -900,6 +900,7 @@ impl Vm for HallaVm {
             VmCap::ReadOnlyMemoryRegion => false,
             VmCap::MemNoncoherentDma => false,
             VmCap::Sve => false,
+            VmCap::NestedVirt => false,
         }
     }
 

@@ -22,6 +22,10 @@ pub const KVM_CAP_USER_CONFIGURE_NONCOHERENT_DMA_CROS: u32 = 236;
 pub const KVM_CAP_USER_CONFIGURE_NONCOHERENT_DMA: u32 = 239;
 pub const KVM_MEM_NON_COHERENT_DMA: u32 = 8;
 
+// TODO(b/530881992): Drop once the vendored kvm headers are regenerated from a kernel that
+// defines KVM_CAP_ARM_EL2 (>= 6.15).
+pub const KVM_CAP_ARM_EL2: u32 = 240;
+
 // TODO(qwandor): Update this once the pKVM patches are merged upstream with a stable capability ID.
 pub const KVM_CAP_ARM_PROTECTED_VM: u32 = 0xffbadab1;
 pub const KVM_CAP_ARM_PROTECTED_VM_FLAGS_SET_FW_IPA: u32 = 0;

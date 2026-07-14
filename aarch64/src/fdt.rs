@@ -150,6 +150,7 @@ fn create_gic_node(
     is_gicv3: bool,
     has_vgic_its: bool,
     num_vcpus: u64,
+    enable_nested: bool,
 ) -> Result<()> {
     let mut gic_reg_prop = [AARCH64_GIC_DIST_BASE, AARCH64_GIC_DIST_SIZE, 0, 0];
 
@@ -169,6 +170,13 @@ fn create_gic_node(
     intc_node.set_prop("phandle", PHANDLE_GIC)?;
     intc_node.set_prop("#address-cells", 2u32)?;
     intc_node.set_prop("#size-cells", 2u32)?;
+
+    // When the guest itself acts as a KVM host (FEAT_NV2), declare the GIC
+    // maintenance IRQ on PPI 9 / INTID 25.
+    if enable_nested {
+        let maint_irq = [GIC_FDT_IRQ_TYPE_PPI, 9, IRQ_TYPE_LEVEL_HIGH];
+        intc_node.set_prop("interrupts", &maint_irq)?;
+    }
 
     if has_vgic_its {
         intc_node.set_prop("ranges", ())?;
@@ -280,12 +288,14 @@ fn psci_compatible(version: &PsciVersion) -> Vec<&str> {
     compatible
 }
 
-fn create_psci_node(fdt: &mut Fdt, version: &PsciVersion) -> Result<()> {
+fn create_psci_node(fdt: &mut Fdt, version: &PsciVersion, enable_nested: bool) -> Result<()> {
     let compatible = psci_compatible(version);
     let psci_node = fdt.root_mut().subnode_mut("psci")?;
     psci_node.set_prop("compatible", compatible.as_slice())?;
-    // Only support aarch64 guest
-    psci_node.set_prop("method", "hvc")?;
+    // At virtual EL2 (FEAT_NV2) the PSCI conduit must be SMC: an HVC executed at
+    // vEL2 traps to vEL2 rather than reaching the host hypervisor.
+    let method = if enable_nested { "smc" } else { "hvc" };
+    psci_node.set_prop("method", method)?;
     Ok(())
 }
 
@@ -652,6 +662,7 @@ pub fn create_fdt(
     device_tree_overlays: Vec<DtbOverlay>,
     serial_devices: &[SerialDeviceInfo],
     virt_cpufreq_v2: bool,
+    enable_nested: bool,
 ) -> Result<()> {
     let mut fdt = Fdt::new(&[]);
     let mut phandles_key_cache = Vec::new();
@@ -710,13 +721,19 @@ pub fn create_fdt(
         vcpu_clusters,
         &vcpu_properties,
     )?;
-    create_gic_node(&mut fdt, is_gicv3, has_vgic_its, num_vcpus as u64)?;
+    create_gic_node(
+        &mut fdt,
+        is_gicv3,
+        has_vgic_its,
+        num_vcpus as u64,
+        enable_nested,
+    )?;
     create_timer_node(&mut fdt, num_vcpus)?;
     if use_pmu {
         create_pmu_node(&mut fdt, num_vcpus)?;
     }
     create_serial_nodes(&mut fdt, serial_devices)?;
-    create_psci_node(&mut fdt, &psci_version)?;
+    create_psci_node(&mut fdt, &psci_version, enable_nested)?;
     create_pci_nodes(
         &mut fdt,
         pci_irqs,
@@ -849,6 +866,53 @@ mod tests {
             psci_compatible(&PsciVersion::new(1, 5).unwrap()),
             vec!["arm,psci-1.0", "arm,psci-0.2"]
         );
+    }
+
+    #[test]
+    fn psci_node_conduit_method_hvc() {
+        let mut fdt = Fdt::new(&[]);
+        create_psci_node(&mut fdt, &PsciVersion::new(1, 0).unwrap(), false).unwrap();
+        assert_eq!(
+            fdt.get_node("/psci")
+                .unwrap()
+                .get_prop::<String>("method")
+                .unwrap(),
+            "hvc"
+        );
+    }
+
+    #[test]
+    fn psci_node_conduit_method_smc() {
+        let mut fdt = Fdt::new(&[]);
+        create_psci_node(&mut fdt, &PsciVersion::new(1, 0).unwrap(), true).unwrap();
+        assert_eq!(
+            fdt.get_node("/psci")
+                .unwrap()
+                .get_prop::<String>("method")
+                .unwrap(),
+            "smc"
+        );
+    }
+
+    #[test]
+    fn gic_node_maintenance_irq() {
+        let mut fdt = Fdt::new(&[]);
+        create_gic_node(&mut fdt, true, false, 2, true).unwrap();
+        assert_eq!(
+            fdt.get_node("/intc")
+                .unwrap()
+                .get_prop::<Vec<u32>>("interrupts")
+                .unwrap(),
+            vec![GIC_FDT_IRQ_TYPE_PPI, 9, IRQ_TYPE_LEVEL_HIGH]
+        );
+
+        let mut fdt = Fdt::new(&[]);
+        create_gic_node(&mut fdt, true, false, 2, false).unwrap();
+        assert!(fdt
+            .get_node("/intc")
+            .unwrap()
+            .get_prop::<Vec<u32>>("interrupts")
+            .is_none());
     }
 
     #[test]

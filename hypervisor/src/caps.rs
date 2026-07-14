@@ -61,4 +61,7 @@ pub enum VmCap {
     /// by requesting `VcpuFeature::Sve` when calling `VcpuAarch64::init()`.
     #[cfg(target_arch = "aarch64")]
     Sve,
+    /// If supported, this VM supports ARM nested virtualization.
+    #[cfg(target_arch = "aarch64")]
+    NestedVirt,
 }

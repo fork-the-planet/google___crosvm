@@ -57,7 +57,7 @@ use devices::PflashParameters;
 use devices::StubPciParameters;
 #[cfg(target_arch = "x86_64")]
 use hypervisor::CpuHybridType;
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 use hypervisor::NestedMode;
 use hypervisor::ProtectionType;
 use jail::JailConfig;
@@ -165,7 +165,7 @@ pub struct CpuOptions {
 }
 
 /// Nested virtualization configuration.
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, FromKeyValues)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct NestedConfig {
@@ -706,7 +706,7 @@ pub struct Config {
     #[cfg(target_arch = "aarch64")]
     pub mte: bool,
     pub name: Option<String>,
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     pub nested: NestedConfig,
     #[cfg(feature = "net")]
     pub net: Vec<NetParameters>,
@@ -950,7 +950,7 @@ impl Default for Config {
             #[cfg(target_arch = "aarch64")]
             mte: false,
             name: None,
-            #[cfg(target_arch = "x86_64")]
+            #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
             nested: NestedConfig::default(),
             #[cfg(feature = "net")]
             net: Vec::new(),
@@ -1433,7 +1433,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     fn parse_nested_config() {
         for (arg, mode) in [
             ("off", NestedMode::Off),
@@ -1448,7 +1448,10 @@ mod tests {
                 NestedConfig { mode }
             );
         }
+        #[cfg(target_arch = "x86_64")]
         assert_eq!(NestedConfig::default().mode, NestedMode::Auto);
+        #[cfg(target_arch = "aarch64")]
+        assert_eq!(NestedConfig::default().mode, NestedMode::Off);
 
         from_key_values::<NestedConfig>("maybe").unwrap_err();
         from_key_values::<NestedConfig>("mode=maybe").unwrap_err();

@@ -633,6 +633,8 @@ impl Vm for KvmVm {
             }
             #[cfg(target_arch = "aarch64")]
             VmCap::Sve => self.check_raw_capability(KvmCap::Sve),
+            #[cfg(target_arch = "aarch64")]
+            VmCap::NestedVirt => self.check_raw_capability(KvmCap::El2),
         }
     }
 

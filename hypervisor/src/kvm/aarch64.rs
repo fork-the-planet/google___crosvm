@@ -452,6 +452,7 @@ impl KvmVcpu {
                     }
                     KVM_ARM_VCPU_SVE
                 }
+                VcpuFeature::NestedVirt => KVM_ARM_VCPU_HAS_EL2,
             };
             all_features |= 1 << shift;
         }

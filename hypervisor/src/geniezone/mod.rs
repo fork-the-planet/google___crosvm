@@ -889,6 +889,7 @@ impl Vm for GeniezoneVm {
             VmCap::ReadOnlyMemoryRegion => false,
             VmCap::MemNoncoherentDma => false,
             VmCap::Sve => false,
+            VmCap::NestedVirt => false,
         }
     }
 

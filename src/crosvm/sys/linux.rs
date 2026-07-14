@@ -1634,6 +1634,8 @@ fn setup_vm_components(cfg: &Config) -> Result<VmComponents> {
         smccc_trng: cfg.smccc_trng,
         #[cfg(target_arch = "aarch64")]
         sve_config: cfg.sve.unwrap_or_default(),
+        #[cfg(target_arch = "aarch64")]
+        nested: cfg.nested.mode,
     })
 }
 

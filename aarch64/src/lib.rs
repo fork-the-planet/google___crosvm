@@ -66,6 +66,7 @@ use hypervisor::DeviceKind;
 use hypervisor::Hypervisor;
 use hypervisor::HypervisorCap;
 use hypervisor::MemCacheType;
+use hypervisor::NestedMode;
 use hypervisor::ProtectionType;
 use hypervisor::VcpuAArch64;
 use hypervisor::VcpuFeature;
@@ -131,6 +132,7 @@ const AARCH64_GIC_ITS_SIZE: u64 = 0x20000;
 
 // PSR (Processor State Register) bits
 const PSR_MODE_EL1H: u64 = 0x00000005;
+const PSR_MODE_EL2H: u64 = 0x00000009;
 const PSR_F_BIT: u64 = 0x00000040;
 const PSR_I_BIT: u64 = 0x00000080;
 const PSR_A_BIT: u64 = 0x00000100;
@@ -317,6 +319,10 @@ pub enum Error {
     MapPvtimeError(base::Error),
     #[error("missing power manager for assigned devices")]
     MissingDevicePowerManager,
+    #[error("ARM nested virtualization requires a GICv3 irqchip")]
+    NestedVirtRequiresGicV3,
+    #[error("ARM nested virtualization requested, but not supported by the host")]
+    NestedVirtUnsupported,
     #[error("pVM firmware could not be loaded: {0}")]
     PvmFwLoadFailure(base::Error),
     #[error("ramoops address is different from high_mmio_base: {0} vs {1}")]
@@ -653,6 +659,19 @@ impl arch::LinuxArch for AArch64 {
         use_pmu &= !no_pmu;
         let vcpu_count = components.vcpu_properties.len();
         let mut has_pvtime = true;
+
+        let enable_nested = match components.nested {
+            NestedMode::Off => false,
+            mode => match Self::ensure_nested_virt_available(vm.as_ref(), irq_chip.as_ref()) {
+                Ok(()) => true,
+                Err(err) if mode == NestedMode::On => return Err(err),
+                Err(err) => {
+                    warn!("{err}; booting a regular guest at EL1");
+                    false
+                }
+            },
+        };
+
         let mut vcpus = Vec::with_capacity(vcpu_count);
         let mut vcpu_init = Vec::with_capacity(vcpu_count);
         for vcpu_id in 0..vcpu_count {
@@ -670,6 +689,7 @@ impl arch::LinuxArch for AArch64 {
                     fdt_address,
                     components.hv_cfg.protection_type,
                     components.boot_cpu,
+                    enable_nested,
                 )
             };
             has_pvtime &= vcpu.has_pvtime_support();
@@ -686,7 +706,13 @@ impl arch::LinuxArch for AArch64 {
 
         // Initialize Vcpus after all Vcpu objects have been created.
         for (vcpu_id, vcpu) in vcpus.iter().enumerate() {
-            let features = &Self::vcpu_features(vcpu_id, use_pmu, components.boot_cpu, enable_sve);
+            let features = &Self::vcpu_features(
+                vcpu_id,
+                use_pmu,
+                components.boot_cpu,
+                enable_sve,
+                enable_nested,
+            );
             vcpu.init(features).map_err(Error::VcpuInit)?;
         }
 
@@ -1047,6 +1073,7 @@ impl arch::LinuxArch for AArch64 {
             device_tree_overlays,
             &serial_devices,
             components.virt_cpufreq_v2,
+            enable_nested,
         )
         .map_err(Error::CreateFdt)?;
 
@@ -1369,6 +1396,24 @@ impl arch::GdbOps for AArch64 {
 }
 
 impl AArch64 {
+    /// Ensure nested virtualization can be enabled for this VM.
+    ///
+    /// Nested virt needs host support and a GICv3 irqchip: the guest hypervisor
+    /// drives the GIC virtualization interface (the `ICH_*` registers and the
+    /// maintenance interrupt), which KVM implements only for GICv3.
+    fn ensure_nested_virt_available(
+        vm: &dyn VmAArch64,
+        irq_chip: &dyn IrqChipAArch64,
+    ) -> Result<()> {
+        if !vm.check_capability(VmCap::NestedVirt) {
+            return Err(Error::NestedVirtUnsupported);
+        }
+        if irq_chip.get_vgic_version() != DeviceKind::ArmVgicV3 {
+            return Err(Error::NestedVirtRequiresGicV3);
+        }
+        Ok(())
+    }
+
     /// This returns a base part of the kernel command for this architecture
     fn get_base_linux_cmdline() -> kernel_cmdline::Cmdline {
         let mut cmdline = kernel_cmdline::Cmdline::new();
@@ -1436,11 +1481,14 @@ impl AArch64 {
     ///
     /// * `vcpu_id` - The VM's index for `vcpu`.
     /// * `use_pmu` - Should `vcpu` be configured to use the Performance Monitor Unit.
+    /// * `enable_sve` - Request `VcpuFeature::Sve` (Scalable Vector Extension).
+    /// * `enable_nested` - Request `VcpuFeature::NestedVirt` (FEAT_NV2 virtual EL2).
     fn vcpu_features(
         vcpu_id: usize,
         use_pmu: bool,
         boot_cpu: usize,
         enable_sve: bool,
+        enable_nested: bool,
     ) -> Vec<VcpuFeature> {
         let mut features = vec![VcpuFeature::PsciV0_2];
         if use_pmu {
@@ -1453,6 +1501,9 @@ impl AArch64 {
         if enable_sve {
             features.push(VcpuFeature::Sve);
         }
+        if enable_nested {
+            features.push(VcpuFeature::NestedVirt);
+        }
 
         features
     }
@@ -1462,17 +1513,24 @@ impl AArch64 {
     /// # Arguments
     ///
     /// * `vcpu_id` - The VM's index for `vcpu`.
+    /// * `enable_nested` - Boot the vCPU at EL2h instead of the default EL1h.
     fn vcpu_init(
         vcpu_id: usize,
         payload: &PayloadType,
         fdt_address: GuestAddress,
         protection_type: ProtectionType,
         boot_cpu: usize,
+        enable_nested: bool,
     ) -> VcpuInitAArch64 {
         let mut regs: BTreeMap<VcpuRegAArch64, u64> = Default::default();
 
-        // All interrupts masked
-        let pstate = PSR_D_BIT | PSR_A_BIT | PSR_I_BIT | PSR_F_BIT | PSR_MODE_EL1H;
+        // Boot at the requested exception level, with all interrupts masked.
+        let mode = if enable_nested {
+            PSR_MODE_EL2H
+        } else {
+            PSR_MODE_EL1H
+        };
+        let pstate = PSR_D_BIT | PSR_A_BIT | PSR_I_BIT | PSR_F_BIT | mode;
         regs.insert(VcpuRegAArch64::Pstate, pstate);
 
         // Other cpus are powered off initially
@@ -1570,7 +1628,7 @@ mod tests {
         let fdt_address = GuestAddress(0x1234);
         let prot = ProtectionType::Unprotected;
 
-        let vcpu_init = AArch64::vcpu_init(0, &payload, fdt_address, prot, 0);
+        let vcpu_init = AArch64::vcpu_init(0, &payload, fdt_address, prot, 0, false);
 
         // PC: kernel image entry point
         assert_eq!(vcpu_init.regs.get(&VcpuRegAArch64::Pc), Some(&0x8080_0000));
@@ -1595,7 +1653,7 @@ mod tests {
         let fdt_address = GuestAddress(0x1234);
         let prot = ProtectionType::Unprotected;
 
-        let vcpu_init = AArch64::vcpu_init(0, &payload, fdt_address, prot, 0);
+        let vcpu_init = AArch64::vcpu_init(0, &payload, fdt_address, prot, 0, false);
 
         // PC: bios image entry point
         assert_eq!(vcpu_init.regs.get(&VcpuRegAArch64::Pc), Some(&0x8020_0000));
@@ -1622,7 +1680,7 @@ mod tests {
         let fdt_address = GuestAddress(0x1234);
         let prot = ProtectionType::Protected;
 
-        let vcpu_init = AArch64::vcpu_init(0, &payload, fdt_address, prot, 0);
+        let vcpu_init = AArch64::vcpu_init(0, &payload, fdt_address, prot, 0, false);
 
         // The hypervisor provides the initial value of PC, so PC should not be present in the
         // vcpu_init register map.
@@ -1639,6 +1697,39 @@ mod tests {
 
         // X2: image size
         assert_eq!(vcpu_init.regs.get(&VcpuRegAArch64::X(2)), Some(&0x1000));
+    }
+
+    #[test]
+    fn vcpu_init_boot_pstate_el() {
+        let payload = PayloadType::Kernel(LoadedKernel {
+            address_range: AddressRange::from_start_and_size(0x8080_0000, 0x1000).unwrap(),
+            size: 0x1000,
+            entry: GuestAddress(0x8080_0000),
+            class: kernel_loader::ElfClass::ElfClass64,
+        });
+        let fdt_address = GuestAddress(0x1234);
+        let prot = ProtectionType::Unprotected;
+        let masked = PSR_D_BIT | PSR_A_BIT | PSR_I_BIT | PSR_F_BIT;
+
+        let el1 = AArch64::vcpu_init(0, &payload, fdt_address, prot, 0, false);
+        assert_eq!(
+            el1.regs.get(&VcpuRegAArch64::Pstate),
+            Some(&(masked | PSR_MODE_EL1H))
+        );
+
+        let nested = AArch64::vcpu_init(0, &payload, fdt_address, prot, 0, true);
+        assert_eq!(
+            nested.regs.get(&VcpuRegAArch64::Pstate),
+            Some(&(masked | PSR_MODE_EL2H))
+        );
+    }
+
+    #[test]
+    fn vcpu_features_nested() {
+        let with = AArch64::vcpu_features(0, false, 0, false, true);
+        assert!(with.contains(&VcpuFeature::NestedVirt));
+        let without = AArch64::vcpu_features(0, false, 0, false, false);
+        assert!(!without.contains(&VcpuFeature::NestedVirt));
     }
 
     #[test]

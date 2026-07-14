@@ -576,6 +576,8 @@ impl Vm for GunyahVm {
             VmCap::MemNoncoherentDma => false,
             #[cfg(target_arch = "aarch64")]
             VmCap::Sve => false,
+            #[cfg(target_arch = "aarch64")]
+            VmCap::NestedVirt => false,
         }
     }
 

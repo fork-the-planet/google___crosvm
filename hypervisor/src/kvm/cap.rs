@@ -130,6 +130,8 @@ pub enum KvmCap {
     UserMemory2 = KVM_CAP_USER_MEMORY2,
     #[cfg(target_arch = "aarch64")]
     Sve = KVM_CAP_ARM_SVE,
+    #[cfg(target_arch = "aarch64")]
+    El2 = KVM_CAP_ARM_EL2,
     MsiDevid = KVM_CAP_MSI_DEVID,
     ExitHypercall = KVM_CAP_EXIT_HYPERCALL,
 }

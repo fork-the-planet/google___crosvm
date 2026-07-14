@@ -698,9 +698,10 @@ impl ProtectionType {
 #[serde(rename_all = "kebab-case")]
 pub enum NestedMode {
     /// Hide it from the guest.
+    #[cfg_attr(not(target_arch = "x86_64"), default)]
     Off,
     /// Expose it if the host supports it.
-    #[default]
+    #[cfg_attr(target_arch = "x86_64", default)]
     Auto,
     /// Require it, failing to start the VM if the host cannot back it.
     On,

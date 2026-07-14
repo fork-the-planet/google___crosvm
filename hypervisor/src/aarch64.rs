@@ -284,4 +284,6 @@ pub enum VcpuFeature {
     PowerOff,
     /// Scalable Vector Extension support
     Sve,
+    /// Nested virtualization support.
+    NestedVirt,
 }
